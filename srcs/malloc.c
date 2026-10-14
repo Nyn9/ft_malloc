@@ -25,86 +25,70 @@ size_t get_heap_size(SizeType type, size_t size) {
 	return (size + sizeof(t_heap));
 }
 
-void init_block(t_block *block, t_block *prev, size_t size) {
+void init_block(t_block *block, size_t size) {
 	block->next = NULL;
-	block->prev = prev;
 	block->size = size;
 	block->free = FALSE;
-	printf("[BLOCK STATUS] block : %p / next : %p / prev : %p / size : %ld\n", block, block->next, block->prev, block->size);
 }
 
-void check_available_block(t_heap *heap, size_t size) {
-	t_block *current_block = &heap->block;
-	t_block *prev;
-	size_t pos = 0;
+t_block *check_available_block(t_heap *heap, size_t size) {
+	t_block *block = (t_block *)((char *)heap + sizeof(t_heap));
 
-	if (heap->available_size == heap->total_size - sizeof(t_heap)) {
-
-		printf("First Block\n");
-		init_block(current_block, NULL, size);
-		heap->offset += size;
-		return ;
+	if (heap->availableSize + sizeof(t_heap) == heap->totalSize) {
+		init_block(block, size);
+		return block;
 	}
-	while (current_block) {
-		if (current_block->free == TRUE && current_block->size >= size) {
-			printf("Existing Block\n");
-			current_block->size = size;
-			current_block->free = FALSE;
-			heap->offset += sizeof(t_block) + size;
-			return ;
+
+	while (block) {
+		// TODO : Split le block
+		if (block->free == TRUE && block->size >= size) {
+			block->size = size;
+			block->free = FALSE;
+			return block;
 		}
-		pos += current_block->size;
-		prev = current_block;
-		printf("[BLOCK STATUS LOOP] block : %p / next : %p / prev : %p / size : %ld\n", current_block, current_block->next, current_block->prev, current_block->size);
-		current_block = current_block->next;
+		if (block->next == NULL)
+			break;
+		block = block->next;
 	}
-	t_block *new = (t_block *)((char *)heap + sizeof(t_heap) + heap->offset);
-	printf("New Block\n");
-	prev->next = new;
-	printf("[PREV STATUS] block : %p / next : %p / prev : %p / size : %ld\n", prev, prev->next, prev->prev, prev->size);
-	// printf("size : %ld\n", new.size);
-	init_block(new, prev, size);
-	heap->offset += sizeof(t_block) + size;
+	t_block *new = (t_block *)((char *)block + sizeof(t_block) + block->size);
+	block->next = new;
+	init_block(new, size);
+	return new;
 }
 
 t_heap *init_heap(size_t size, SizeType type) {
 	t_heap *heap;
 	size_t heapSize = get_heap_size(type, size);
 	heap = mmap(NULL, heapSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	printf("HeapSize : %p\n",heap);
-	heap->total_size = heapSize;
-	heap->available_size = heapSize - sizeof(t_heap);
-	heap->offset = 0;
+	heap->next = NULL;
+	heap->totalSize = heapSize;
+	heap->availableSize = heapSize - sizeof(t_heap);
 	heap->type = type;
-	printf("[HEAP STATUS] total : %ld / available : %ld\n", heap->total_size, heap->available_size);
 	return heap;
 }
 
 void *check_available_heap(size_t size, SizeType type, t_heap **heap) {
-	if (!*heap) {
-		printf("First Heap\n");
+	if (!*heap)
 		*heap = init_heap(size, type);
-	}
 	t_heap *current_heap = *heap;
-	t_heap *prev;
+	size_t dataSize = size + sizeof(t_block);
 	while (current_heap)
 	{
-		if (current_heap->type == type && current_heap->available_size >= size) {
-			printf("Existing Heap\n");
-			check_available_block(current_heap, size);
-			current_heap->available_size -= size;
-			return (uint8_t *)current_heap + current_heap->offset;
+		// TODO : Check non suffisant
+		if (current_heap->type == type && current_heap->availableSize >= dataSize) {
+			t_block *block = check_available_block(current_heap, size);
+			current_heap->availableSize -= dataSize;
+			return (uint8_t *)block + sizeof(t_block);
 		}
-		prev = current_heap;
+		if (current_heap->next == NULL)
+			break;
 		current_heap = current_heap->next;
 	}
-	printf("New Heap\n");
 	t_heap *new = init_heap(size, type);
-	new->prev = prev;
-	prev->next = new;
-	check_available_block(new, size);
-	new->available_size -= size;
-	return (uint8_t *)new + new->offset;
+	t_block *block = check_available_block(new, size);
+	new->availableSize -= dataSize;
+	current_heap->next = new;
+	return (uint8_t *)block + sizeof(t_block);
 }
 
 void *ft_malloc(size_t size) {

@@ -14,18 +14,14 @@ typedef	enum {
 
 typedef struct s_block {
 	struct s_block *next;
-	struct s_block *prev;
 	size_t size;
 	Bool free;
 } t_block;
 
 typedef struct s_heap {
 	struct s_heap *next;
-	struct s_heap *prev;
-	t_block block;
-	size_t offset;
-	size_t total_size;
-	size_t available_size;
+	size_t totalSize;
+	size_t availableSize;
 	SizeType type;
 } t_heap;
 
