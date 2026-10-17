@@ -1,13 +1,6 @@
 #include "ft_malloc.h"
-#include "stdio.h"
-#include <sys/mman.h>
 
-#define TINY_HEAP_SIZE (4 * sysconf(_SC_PAGESIZE))
-#define TINY_BLOCK_SIZE (TINY_HEAP_SIZE / 128)
-
-#define SMALL_HEAP_SIZE (16 * sysconf(_SC_PAGESIZE))
-#define SMALL_BLOCK_SIZE (SMALL_HEAP_SIZE / 128)
-
+t_heap *g_heap = NULL;
 
 SizeType get_size_type(size_t size) {
 	if (size <= (size_t)TINY_BLOCK_SIZE)
@@ -24,7 +17,7 @@ size_t get_heap_size(SizeType type, size_t size) {
 		return SMALL_HEAP_SIZE;
 	size_t pageSize = sysconf(_SC_PAGESIZE);
 	size_t total = size + sizeof(t_heap) + sizeof(t_block);
-	return (total + pageSize - 1) / pageSize * pageSize; 
+	return (total + pageSize - 1) / pageSize * pageSize;
 }
 
 void init_block(t_block *block, t_block *prev, size_t size) {
@@ -69,7 +62,7 @@ t_block *check_available_block(t_heap *heap, size_t size) {
 			block->free = FALSE;
 			return block;
 		}
-		if (block->next == NULL)
+		if (!block->next)
 			break;
 		block = block->next;
 	}
@@ -99,38 +92,56 @@ t_heap *init_heap(size_t size, SizeType type) {
 	return heap;
 }
 
-void *check_available_heap(size_t size, SizeType type, t_heap **heap) {
-	if (!*heap) {
-		*heap = init_heap(size, type);
-		if (*heap == NULL)
+void *check_available_heap(size_t size, SizeType type) {
+	if (!g_heap) {
+		g_heap = init_heap(size, type);
+		if (!g_heap)
 			return NULL;
+		t_block *block = check_available_block(g_heap, size);
+		return (uint8_t *)block + sizeof(t_block);
 	}
-	t_heap *current_heap = *heap;
-	while (current_heap)
-	{
-		if (current_heap->type == type && current_heap->availableSize >= size + sizeof(t_block)) {
-			t_block *block = check_available_block(current_heap, size);
-			if (block != NULL)
+
+	t_heap *heap = g_heap;
+	while (heap) {
+		if (heap->type == type && type != LARGE && heap->availableSize >= size + sizeof(t_block)) {
+			t_block *block = check_available_block(heap, size);
+			if (block)
 				return (uint8_t *)block + sizeof(t_block);
 		}
-		if (current_heap->next == NULL)
+		if (!heap->next)
 			break;
-		current_heap = current_heap->next;
+		heap = heap->next;
 	}
+
 	t_heap *new = init_heap(size, type);
-	if (new == NULL)
+	if (!new)
 		return NULL;
 	t_block *block = check_available_block(new, size);
-	new->prev = current_heap;
-	current_heap->next = new;
+	new->prev = heap;
+	heap->next = new;
 	return (uint8_t *)block + sizeof(t_block);
 }
 
-void *ft_malloc(size_t size) {
-	static t_heap *heap = NULL;
+void *malloc(size_t size) {
 	if (size > SIZE_MAX - sizeof(t_heap) - sizeof(t_block) - sysconf(_SC_PAGESIZE) - 15 || !size)
 		return NULL;
 	size = (size + 15) & ~15;
 	SizeType type = get_size_type(size);
-	return check_available_heap(size, type, &heap);
+	return check_available_heap(size, type);
 }
+
+
+// int main() {
+// 	printf("%ld\n", sysconf(_SC_PAGESIZE));
+// 	_Static_assert(sizeof(t_heap) % 16 == 0, "t_heap not aligned");
+// 	_Static_assert(sizeof(t_block) % 16 == 0, "t_block not aligned");
+// 	int *tabLARGE = malloc(1000 * sizeof(int));
+
+// 	for (int i = 0; i < 5; i++)
+// 		tabLARGE[i] = i + 50;
+// 	printf("%p\n", tabLARGE);
+
+// 	free(tabLARGE);
+// 	for (int i = 0; i < 5; i++) 
+// 		printf("tabLARGEE[%d] : %d\n", i, tabLARGE[i]);
+// }
