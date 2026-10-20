@@ -1,15 +1,5 @@
 #include "ft_malloc.h"
 
-void merge_block(t_block *p, t_block *n, t_heap *heap) {
-	t_block *next = n->next;
-	size_t newSize = p->size + n->size + sizeof(t_block);
-	p->next = next;
-	p->size = newSize;
-	if (next)
-		next->prev = p;
-	heap->availableSize += sizeof(t_block);
-}
-
 Bool heap_should_be_free(t_heap *heap) {
 	Bool res = FALSE;
 
@@ -32,19 +22,6 @@ Bool heap_should_be_free(t_heap *heap) {
 	return res;
 }
 
-static t_block *find_block(t_heap *heap, void *ptr) {
-	t_block *block = (t_block *)((char *)heap + sizeof(t_heap));
-
-	while (block) {
-		if ((char *)block + sizeof(t_block) == (char *)ptr)
-			return block;
-		if ((char *)block + sizeof(t_block) > (char *)ptr)
-			return NULL;
-		block = block->next;
-	}
-	return NULL;
-}
-
 void free(void *ptr) {
 	t_heap *heap = g_heap;
 	while (heap) {
@@ -63,11 +40,11 @@ void free(void *ptr) {
 	heap->availableSize += block->size;
 
 	if (block->prev && block->prev->free == TRUE) {
-		merge_block(block->prev, block, heap);
+		merge_block(block->prev, block, heap, block->size);
 		block = block->prev;
 	}
 	if (block->next && block->next->free == TRUE)
-		merge_block(block, block->next, heap);
+		merge_block(block, block->next, heap, block->next->size);
 
 	if (heap_should_be_free(heap) == TRUE) {
 		t_heap *prev = heap->prev;

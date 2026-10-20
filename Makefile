@@ -1,48 +1,57 @@
 .SILENT:
 
-CC 		= cc
-CFLAGS 	= -Wall -Wextra -Werror -Iincludes -Ilib
+CC          = cc
+CFLAGS      = -Wall -Wextra -Werror -fPIC -Iincludes -Ilib
 
-LIBFT = libft.a
-LIBPATH = lib
+ifeq ($(HOSTTYPE),)
+	HOSTTYPE := $(shell uname -m)_$(shell uname -s)
+endif
 
-PROG		= cub3D
+NAME        = libft_malloc_$(HOSTTYPE).so
+LINK        = libft_malloc.so
 
-SRCS_DIR	= srcs/
-SRCS		= malloc.c
+LIBPATH     = lib
+LIBFT       = $(LIBPATH)/libft.a
 
-OBJS_DIR	= objs/
-OBJS		= $(patsubst $(SRCS_DIR)%.c,$(OBJS_DIR)%.o,$(SRC))
+SRCS_DIR    = srcs/
+SRCS        = free.c utils.c malloc.c realloc.c
+OBJS_DIR    = objs/
+OBJS        = $(addprefix $(OBJS_DIR),$(SRCS:.c=.o))
+HEADERS     = $(wildcard includes/*.h)
 
-BONUS		= 0
+TEST_SRC    = tests/test.c
+TEST_BIN    = test_malloc
+TEST_FLAGS  = -Wall -Wextra -Werror -Wno-free-nonheap-object -Iincludes
 
-$(OBJS_DIR)%.o: $(SRCS_DIR)%.c
-					@echo "\033[34mCompiling $<..."
-					@mkdir -p $(dir $@)
-					$(CC) $(CFLAGS) -c $< -o $@
+all: $(NAME)
 
-all: 		${PROG}
+$(OBJS_DIR)%.o: $(SRCS_DIR)%.c $(HEADERS)
+	@echo "\033[34mCompiling $<..."
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-${PROG}:	${OBJS}
-					@echo "\033[33m----Compiling lib----"
-					@if [ -f $(MLXPATH)/Makefile ]; then make -s -C $(MLXPATH); fi
-					@if [ -f $(LIBPATH)/Makefile ]; then make -s -C $(LIBPATH); fi
-					@echo "\n"
-					$(CC) $(CFLAGS) ${OBJS} -l:$(LIBPATH)/$(LIBFT) -o ${PROG} 
-					@echo "\033[32m Cub3d Compiled! ᕦ(\033[31m♥\033[32m_\033[31m♥\033[32m)ᕤ\n"
+$(LIBFT):
+	@echo "\033[33m----Compiling libft----"
+	@make -s -C $(LIBPATH)
+
+$(NAME): $(LIBFT) $(OBJS)
+	$(CC) -shared -o $(NAME) $(OBJS) -L$(LIBPATH) -lft
+	@ln -sf $(NAME) $(LINK)
+	@echo "\033[32m$(NAME) compiled, $(LINK) -> $(NAME)\033[0m"
+
+test: $(NAME) $(TEST_SRC)
+	$(CC) $(TEST_FLAGS) $(TEST_SRC) -o $(TEST_BIN) -L. -lft_malloc -Wl,-rpath,.
+	@echo "\033[32mRun: ./$(TEST_BIN)\033[0m"
 
 clean:
-					@if [ -d ./lib ]; then make -s clean -C ./lib; fi
-					@ ${RM} $(OBJS_DIR)/*.o
-					@ ${RM} -rf $(OBJS_DIR)
-					rm -f ${OBJS}
+	@make -s clean -C $(LIBPATH)
+	@$(RM) -r $(OBJS_DIR)
 
-fclean: 	clean
-					@if [ -f ./lib/Makefile ]; then make -s fclean -C ./lib; fi
-					rm -f ${PROG}
-					@echo "\n\033[31mDeleting EVERYTHING! ⌐(ಠ۾ಠ)¬\n"
+fclean: clean
+	@make -s fclean -C $(LIBPATH)
+	@$(RM) $(NAME) $(LINK) $(TEST_BIN)
+	@echo "\033[31mDeleting EVERYTHING!\033[0m"
 
-re:			fclean all
+re: fclean all
 
-
-.PHONY: all clean fclean re 
+.PHONY: all test clean fclean re

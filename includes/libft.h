@@ -1,15 +1,3 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   libft.h                                            :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: clouaint <clouaint@student.42.fr>          +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2024/12/19 12:57:29 by clouaint          #+#    #+#             */
-/*   Updated: 2025/01/02 15:50:02 by clouaint         ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
-
 #ifndef LIBFT_H
 # define LIBFT_H
 
@@ -25,7 +13,6 @@
 # include <fcntl.h>
 # include <limits.h>
 # include <sys/wait.h>
-# include <X11/Xlib.h>
 # include <math.h>
 
 /* Utils functions */
@@ -84,7 +71,7 @@ void	ft_lstclear(t_list **lst, void (*del)(void*));
 void	ft_lstiter(t_list *lst, void (*f)(void *));
 t_list	*ft_lstmap(t_list *lst, void *(*f)(void *), void (*del)(void *));
 
-/* ft_printf */
+/* Printf */
 
 int		ft_printf(const char *str, ...);
 int		ft_print_hexa(unsigned int nb, char *base);
