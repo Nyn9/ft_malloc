@@ -40,11 +40,11 @@ void free(void *ptr) {
 	heap->availableSize += block->size;
 
 	if (block->prev && block->prev->free == TRUE) {
-		merge_block(block->prev, block, heap, block->size);
+		merge_block(block->prev, block);
 		block = block->prev;
 	}
 	if (block->next && block->next->free == TRUE)
-		merge_block(block, block->next, heap, block->next->size);
+		merge_block(block, block->next);
 
 	if (heap_should_be_free(heap) == TRUE) {
 		t_heap *prev = heap->prev;

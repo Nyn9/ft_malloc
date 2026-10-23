@@ -33,11 +33,7 @@ t_block *split_block(t_block *block, size_t size) {
 	return block;
 }
 
-void merge_block(t_block *p, t_block *n, t_heap *heap, size_t size) {
-	if (size < n->size)
-		n = split_block(n, size);
-	else
-		heap->availableSize += sizeof(t_block);
+void merge_block(t_block *p, t_block *n) {
 	t_block *next = n->next;
 	size_t newSize = p->size + n->size + sizeof(t_block);
 	p->next = next;
@@ -57,4 +53,10 @@ t_block *find_block(t_heap *heap, void *ptr) {
 		block = block->next;
 	}
 	return NULL;
+}
+
+int is_max_size(size_t size) {
+	if (size > SIZE_MAX - sizeof(t_heap) - sizeof(t_block) - sysconf(_SC_PAGESIZE) - 15)
+		return 1;
+	return 0;
 }

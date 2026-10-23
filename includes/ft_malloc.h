@@ -49,5 +49,6 @@ void *realloc(void *ptr, size_t size);
 SizeType get_size_type(size_t size);
 size_t get_heap_size(SizeType type, size_t size);
 t_block *split_block(t_block *block, size_t size);
-void merge_block(t_block *p, t_block *n, t_heap *heap, size_t size);
+void merge_block(t_block *p, t_block *n);
 t_block *find_block(t_heap *heap, void *ptr);
+int is_max_size(size_t size);

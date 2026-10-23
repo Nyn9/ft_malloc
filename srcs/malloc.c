@@ -91,7 +91,7 @@ void *check_available_heap(size_t size, SizeType type) {
 }
 
 void *malloc(size_t size) {
-	if (size > SIZE_MAX - sizeof(t_heap) - sizeof(t_block) - sysconf(_SC_PAGESIZE) - 15 || !size)
+	if (is_max_size(size) || !size)
 		return NULL;
 	size = (size + 15) & ~15;
 	SizeType type = get_size_type(size);
