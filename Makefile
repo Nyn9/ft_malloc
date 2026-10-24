@@ -1,7 +1,9 @@
 .SILENT:
 
+LIBPATH     = libft
+
 CC          = cc
-CFLAGS      = -Wall -Wextra -Werror -fPIC -Iincludes -Ilib
+CFLAGS      = -Wall -Wextra -Werror -fPIC -Iincludes -I$(LIBPATH)
 
 ifeq ($(HOSTTYPE),)
 	HOSTTYPE := $(shell uname -m)_$(shell uname -s)
@@ -10,11 +12,10 @@ endif
 NAME        = libft_malloc_$(HOSTTYPE).so
 LINK        = libft_malloc.so
 
-LIBPATH     = lib
 LIBFT       = $(LIBPATH)/libft.a
 
 SRCS_DIR    = srcs/
-SRCS        = free.c utils.c malloc.c realloc.c
+SRCS        = free.c utils.c malloc.c realloc.c show.c
 OBJS_DIR    = objs/
 OBJS        = $(addprefix $(OBJS_DIR),$(SRCS:.c=.o))
 HEADERS     = $(wildcard includes/*.h)

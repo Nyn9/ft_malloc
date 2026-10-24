@@ -23,12 +23,7 @@ Bool heap_should_be_free(t_heap *heap) {
 }
 
 void free(void *ptr) {
-	t_heap *heap = g_heap;
-	while (heap) {
-		if ((char *)ptr >= (char *)heap && (char *)ptr < (char *)heap + heap->totalSize)
-			break;
-		heap = heap->next;
-	}
+	t_heap *heap = find_heap(ptr);
 	if (!heap)
 		return ;
 
@@ -41,10 +36,13 @@ void free(void *ptr) {
 
 	if (block->prev && block->prev->free == TRUE) {
 		merge_block(block->prev, block);
+		heap->availableSize += sizeof(t_block);
 		block = block->prev;
 	}
-	if (block->next && block->next->free == TRUE)
+	if (block->next && block->next->free == TRUE) {
 		merge_block(block, block->next);
+		heap->availableSize += sizeof(t_block);
+	}
 
 	if (heap_should_be_free(heap) == TRUE) {
 		t_heap *prev = heap->prev;

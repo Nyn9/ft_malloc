@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include "ft_malloc.h"
 
-// void *malloc(size_t size);
+typedef struct { const char *name; void (*fn)(void); int expect_segv; } t_test;
 
 static int g_fail = 0;
 
@@ -14,20 +14,25 @@ static int g_fail = 0;
     else { printf("  [FAIL] %s (ligne %d)\n", msg, __LINE__); g_fail++; } \
 } while (0)
 
-static void test_100_per_zone(void) {
-    printf("Test 1 : au moins 100 allocations dans une meme zone TINY\n");
+static int fits_in_one_zone(size_t size, size_t zone) {
     size_t page = sysconf(_SC_PAGESIZE);
-    size_t zone = 4 * page;
-    char *first = malloc(128);
-    CHECK(first != NULL, "premiere allocation");
-    if (!first) return;
-    int same_zone = 1;
-    for (int i = 1; i < 2; i++) {
-        char *p = malloc(128);
-        if (!p || p < first || (size_t)(p - first) >= zone)
-            same_zone = 0;
+    uintptr_t first = (uintptr_t)malloc(size);
+    if (!first)
+        return 0;
+    uintptr_t start = first & ~(uintptr_t)(page - 1);
+    for (int i = 1; i < 100; i++) {
+        uintptr_t p = (uintptr_t)malloc(size);
+        if (!p || p < start || p + size > start + zone)
+            return 0;
     }
-    CHECK(same_zone, "100 blocs de 128 octets tiennent dans 4 pages");
+    return 1;
+}
+
+static void test_100_per_zone(void) {
+    printf("Test 1 : 100 allocations de taille max dans une meme zone\n");
+    size_t page = sysconf(_SC_PAGESIZE);
+    CHECK(fits_in_one_zone(128, 4 * page), "100 blocs TINY de 128 octets tiennent dans 4 pages");
+    CHECK(fits_in_one_zone(4096, 128 * page), "100 blocs SMALL de 4096 octets tiennent dans 128 pages");
 }
 
 static void test_basic(void) {
@@ -130,9 +135,12 @@ static void test_errors(void) {
 static void test_zero(void) {
     printf("Test 9 : malloc(0)\n");
     void *p = malloc(0);
-	CHECK(p == NULL, "allocation suivante fonctionne");
-    void *q = malloc(16);
-    CHECK(q != NULL, "allocation suivante fonctionne");
+    void *q = malloc(0);
+    CHECK(p != NULL && q != NULL, "malloc(0) retourne un pointeur non NULL");
+    CHECK((uintptr_t)p % 16 == 0 && (uintptr_t)q % 16 == 0, "pointeurs alignes sur 16");
+    CHECK(p != q, "deux malloc(0) donnent deux pointeurs differents");
+    void *r = malloc(16);
+    CHECK(r != NULL && r != p && r != q, "malloc(16) distinct des deux precedents");
 }
 
 static void test_stress(void) {
@@ -158,29 +166,6 @@ static void test_stress(void) {
     CHECK(ok, "aucune corruption entre blocs");
 }
 
-/* ---------- infrastructure : un test = un processus ---------- */
-
-// static void run_isolated(void (*fn)(void), int expect_segv) {
-//     fflush(stdout);
-//     pid_t pid = fork();
-//     if (pid == 0) {
-//         g_fail = 0;
-//         fn();
-//         fflush(stdout);
-//         _exit(g_fail != 0);
-//     }
-//     int st;
-//     waitpid(pid, &st, 0);
-//     if (WIFSIGNALED(st)) {
-//         if (expect_segv && WTERMSIG(st) == SIGSEGV) {
-//             printf("  [OK]   segfault attendu apres munmap\n");
-//             return;
-//         }
-//         printf("  [FAIL] processus tue par le signal %d\n", WTERMSIG(st));
-//         g_fail++;
-//     } else if (WEXITSTATUS(st))
-//         g_fail++;
-// }
 
 /* ---------- tests free ---------- */
 
@@ -344,22 +329,22 @@ static void test_free_orders(void) {
     CHECK(malloc(100) != NULL, "allocation possible apres tout liberer");
 }
 
-// static void test_large_free(void) {
-//     printf("Test 21 : free d'un LARGE rend la zone au systeme\n");
-//     unsigned char *p = malloc(5 * 1024 * 1024);
-//     CHECK(p != NULL, "5 Mo alloues");
-//     if (!p) return;
-//     memset(p, 1, 5 * 1024 * 1024);
-//     free(p);
-//     *(volatile unsigned char *)p = 1;   // doit segfaulter : zone demappee
-//     CHECK(0, "aucun segfault : la zone n'a pas ete munmap");
-// }
+static void test_large_free(void) {
+    printf("Test 21 : free d'un LARGE rend la zone au systeme\n");
+    unsigned char *p = malloc(5 * 1024 * 1024);
+    CHECK(p != NULL, "5 Mo alloues");
+    if (!p) return;
+    memset(p, 1, 5 * 1024 * 1024);
+    free(p);
+    *(volatile unsigned char *)p = 1;   // doit segfaulter : zone demappee
+    CHECK(0, "aucun segfault : la zone n'a pas ete munmap");
+}
 
 static void test_large_own_zone(void) {
     printf("Test 22 : chaque LARGE a sa propre zone\n");
     size_t page = sysconf(_SC_PAGESIZE);
-    uintptr_t a = (uintptr_t)malloc(600);
-    uintptr_t b = (uintptr_t)malloc(600);
+    uintptr_t a = (uintptr_t)malloc(5000);
+    uintptr_t b = (uintptr_t)malloc(5000);
     CHECK(a && b, "deux LARGE de 600 octets");
     CHECK(a / page != b / page, "dans des pages differentes (zones distinctes)");
 }
@@ -415,33 +400,345 @@ static void test_free_stress(void) {
     CHECK(malloc(100) != NULL, "allocation possible apres tout liberer");
 }
 
+/* ---------- helpers ---------- */
+
+static void fill(void *p, size_t n, unsigned char v) {
+    memset(p, v, n);
+}
+
+static int is_filled(const void *p, size_t n, unsigned char v) {
+    const unsigned char *c = p;
+    for (size_t i = 0; i < n; i++)
+        if (c[i] != v) return 0;
+    return 1;
+}
+
+/* ---------- tests realloc ---------- */
+
+static void test_realloc_null(void) {
+    printf("Test 24 : realloc(NULL, n) equivaut a malloc(n)\n");
+    void *p = realloc(NULL, 64);
+    CHECK(p != NULL, "retourne un pointeur");
+    CHECK((uintptr_t)p % 16 == 0, "aligne");
+    if (p) { fill(p, 64, 1); free(p); }
+}
+
+static void test_realloc_zero(void) {
+    printf("Test 25 : realloc(p, 0)\n");
+    void *p = malloc(64);
+    CHECK(p != NULL, "allocation");
+    if (!p) return;
+    CHECK(realloc(p, 0) == NULL, "retourne NULL");
+    CHECK(malloc(64) != NULL, "malloc fonctionne apres (p a ete libere)");
+}
+
+static void test_realloc_same(void) {
+    printf("Test 26 : realloc a la meme taille\n");
+    unsigned char *p = malloc(64);
+    CHECK(p != NULL, "allocation");
+    if (!p) return;
+    fill(p, 64, 0x11);
+    CHECK(realloc(p, 64) == p, "64 -> 64 : meme pointeur");
+    CHECK(realloc(p, 60) == p, "64 -> 60 (arrondi a 64) : meme pointeur");
+    CHECK(is_filled(p, 64, 0x11), "contenu intact");
+    free(p);
+}
+
+static void test_realloc_shrink(void) {
+    printf("Test 27 : realloc plus petit\n");
+    unsigned char *p = malloc(128);
+    unsigned char *guard = malloc(16);
+    CHECK(p && guard, "allocations");
+    if (!p || !guard) return;
+    fill(p, 128, 0x22);
+    fill(guard, 16, 0x33);
+    unsigned char *q = realloc(p, 32);
+    CHECK(q == p, "128 -> 32 : meme pointeur");
+    CHECK(is_filled(q, 32, 0x22), "32 premiers octets conserves");
+    unsigned char *r = malloc(64);
+    CHECK(r != NULL && r != q, "le reste libere est reutilisable");
+    if (r) fill(r, 64, 0x44);
+    CHECK(is_filled(q, 32, 0x22), "pas de chevauchement avec le reste");
+    CHECK(is_filled(guard, 16, 0x33), "bloc voisin intact");
+}
+
+static void test_realloc_shrink_nosplit(void) {
+    printf("Test 28 : realloc plus petit sans place pour un split\n");
+    unsigned char *p = malloc(64);
+    unsigned char *guard = malloc(16);
+    CHECK(p && guard, "allocations");
+    if (!p || !guard) return;
+    fill(p, 64, 0x55);
+    fill(guard, 16, 0x66);
+    CHECK(realloc(p, 48) == p, "64 -> 48 : meme pointeur");
+    CHECK(realloc(p, 32) == p, "64 -> 32 (reste trop petit) : meme pointeur");
+    CHECK(is_filled(p, 32, 0x55), "contenu conserve");
+    CHECK(is_filled(guard, 16, 0x66), "bloc voisin intact");
+}
+
+static void test_realloc_grow_inplace(void) {
+    printf("Test 29 : realloc plus grand sur place (voisin libre)\n");
+    unsigned char *a = malloc(32);
+    unsigned char *b = malloc(64);
+    unsigned char *c = malloc(16);
+    CHECK(a && b && c, "3 allocations");
+    if (!a || !b || !c) return;
+    fill(a, 32, 0x77);
+    fill(c, 16, 0x88);
+    free(b);
+    unsigned char *x = realloc(a, 80);
+    CHECK(x == a, "32 -> 80 avec voisin libre : meme pointeur");
+    CHECK(x && is_filled(x, 32, 0x77), "32 premiers octets conserves");
+    if (x) fill(x, 80, 0x99);
+    CHECK(is_filled(c, 16, 0x88), "bloc suivant intact apres ecriture des 80 octets");
+}
+
+static void test_realloc_grow_split(void) {
+    printf("Test 30 : realloc plus grand sur place avec reste libre\n");
+    unsigned char *a = malloc(32);
+    unsigned char *b = malloc(128);
+    unsigned char *c = malloc(16);
+    CHECK(a && b && c, "3 allocations");
+    if (!a || !b || !c) return;
+    fill(a, 32, 0x12);
+    fill(c, 16, 0x34);
+    free(b);
+    unsigned char *x = realloc(a, 64);
+    CHECK(x == a, "32 -> 64 : meme pointeur");
+    if (x) fill(x, 64, 0x56);
+    unsigned char *y = malloc(64);
+    CHECK(y != NULL, "le reste libre est reutilisable");
+    if (y) fill(y, 64, 0x78);
+    CHECK(x && is_filled(x, 64, 0x56), "bloc realloc intact");
+    CHECK(is_filled(c, 16, 0x34), "bloc suivant intact");
+}
+
+static void test_realloc_grow_move(void) {
+    printf("Test 31 : realloc plus grand avec deplacement\n");
+    unsigned char *a = malloc(32);
+    unsigned char *b = malloc(32);
+    CHECK(a && b, "2 allocations");
+    if (!a || !b) return;
+    fill(a, 32, 0xA1);
+    fill(b, 32, 0xB2);
+    unsigned char *x = realloc(a, 96);
+    CHECK(x != NULL, "retourne un pointeur");
+    if (!x) return;
+    CHECK(x != a, "voisin occupe : le bloc change d'adresse");
+    CHECK(is_filled(x, 32, 0xA1), "contenu copie");
+    fill(x, 96, 0xC3);
+    CHECK(is_filled(b, 32, 0xB2), "voisin intact apres ecriture des 96 octets");
+}
+
+static void test_realloc_categories(void) {
+    printf("Test 32 : changement de categorie TINY <-> SMALL <-> LARGE\n");
+    unsigned char *p = malloc(100);
+    CHECK(p != NULL, "TINY 100");
+    if (!p) return;
+    fill(p, 100, 0xD1);
+    p = realloc(p, 1000);
+    CHECK(p && is_filled(p, 100, 0xD1), "TINY -> SMALL : contenu conserve");
+    if (!p) return;
+    fill(p, 1000, 0xD2);
+    p = realloc(p, 100000);
+    CHECK(p && is_filled(p, 1000, 0xD2), "SMALL -> LARGE : contenu conserve");
+    if (!p) return;
+    fill(p, 100000, 0xD3);
+    p = realloc(p, 2000);
+    CHECK(p && is_filled(p, 2000, 0xD3), "LARGE -> SMALL : contenu conserve");
+    if (!p) return;
+    fill(p, 2000, 0xD4);
+    p = realloc(p, 50);
+    CHECK(p && is_filled(p, 50, 0xD4), "SMALL -> TINY : contenu conserve");
+    free(p);
+}
+
+static void test_realloc_large(void) {
+    printf("Test 33 : realloc LARGE\n");
+    size_t s1 = 200000, s2 = 400000, s3 = 150000;
+    unsigned char *p = malloc(s1);
+    CHECK(p != NULL, "alloc LARGE");
+    if (!p) return;
+    fill(p, s1, 0xE1);
+    CHECK(realloc(p, s1) == p, "meme taille : meme pointeur");
+    unsigned char *q = realloc(p, s2);
+    CHECK(q && is_filled(q, s1, 0xE1), "agrandi : contenu conserve");
+    if (!q) return;
+    fill(q, s2, 0xE2);
+    unsigned char *r = realloc(q, s3);
+    CHECK(r && is_filled(r, s3, 0xE2), "reduit : contenu conserve");
+    free(r);
+}
+
+static void test_realloc_invalid(void) {
+    printf("Test 34 : realloc sur pointeur invalide ou taille impossible\n");
+    int local;
+    void *volatile bad = &local;
+    CHECK(realloc(bad, 32) == NULL, "adresse de pile -> NULL");
+    unsigned char *p = malloc(64);
+    CHECK(p != NULL, "allocation");
+    if (!p) return;
+    fill(p, 64, 0xF1);
+    volatile size_t huge = SIZE_MAX;
+    CHECK(realloc(p, huge) == NULL, "taille impossible -> NULL");
+    CHECK(is_filled(p, 64, 0xF1), "ancien bloc intact apres l'echec");
+    volatile size_t off = 16;
+    CHECK(realloc(p + off, 32) == NULL, "p + 16 -> NULL");
+    CHECK(is_filled(p, 64, 0xF1), "ancien bloc toujours intact");
+    free(p);
+}
+
+static void test_realloc_stress(void) {
+    printf("Test 35 : stress malloc/realloc/free melanges\n");
+    enum { SLOTS = 256, OPS = 50000 };
+    static unsigned char *ptrs[SLOTS];
+    static size_t sizes[SLOTS];
+    static unsigned char tags[SLOTS];
+    srand(777);
+    int ok = 1;
+    for (int op = 0; op < OPS && ok; op++) {
+        int i = rand() % SLOTS;
+        int r = rand() % 100;
+        size_t ns = r < 70 ? 1 + rand() % 128
+                  : r < 95 ? 129 + rand() % 900
+                  : 1025 + rand() % 20000;
+        if (ptrs[i] && !is_filled(ptrs[i], sizes[i], tags[i])) { ok = 0; break; }
+        if (!ptrs[i]) {
+            ptrs[i] = malloc(ns);
+        } else if (rand() % 4 == 0) {
+            free(ptrs[i]);
+            ptrs[i] = NULL;
+            continue;
+        } else {
+            size_t keep = sizes[i] < ns ? sizes[i] : ns;
+            unsigned char *q = realloc(ptrs[i], ns);
+            if (!q || !is_filled(q, keep, tags[i])) { ok = 0; break; }
+            ptrs[i] = q;
+        }
+        if (!ptrs[i] || (uintptr_t)ptrs[i] % 16) { ok = 0; break; }
+        sizes[i] = ns;
+        tags[i] = op & 0xFF;
+        fill(ptrs[i], ns, tags[i]);
+    }
+    CHECK(ok, "50000 operations : contenu conserve, pointeurs alignes");
+    for (int i = 0; i < SLOTS; i++) {
+        if (!ptrs[i]) continue;
+        if (!is_filled(ptrs[i], sizes[i], tags[i])) ok = 0;
+        free(ptrs[i]);
+    }
+    CHECK(ok, "contenu intact avant le free final");
+    CHECK(malloc(100) != NULL, "allocation possible apres tout liberer");
+}
+
+static void test_show_alloc_mem(void) {
+    printf("Test 36 : show_alloc_mem (a comparer avec l'enonce)\n");
+    unsigned char *a = malloc(42);
+    unsigned char *b = malloc(84);
+    unsigned char *c = malloc(3725);
+    unsigned char *d = malloc(48847);
+    if (!a || !b || !c || !d) {
+        printf("  malloc a echoue\n");
+        g_fail = 1;
+        return;
+    }
+    fill(a, 42, 0xA1);
+    fill(b, 84, 0xB2);
+    fill(c, 3725, 0xC3);
+    fill(d, 48847, 0xD4);
+
+    printf("attendu : 42 et 84 (TINY), 3725 (SMALL), 48847 (LARGE), Total 52698\n\n");
+    fflush(stdout);
+    show_alloc_mem();
+
+    if (!is_filled(a, 42, 0xA1) || !is_filled(b, 84, 0xB2)
+        || !is_filled(c, 3725, 0xC3) || !is_filled(d, 48847, 0xD4)) {
+        printf("  contenu corrompu : blocs qui se chevauchent\n");
+        g_fail = 1;
+    }
+
+    free(a);
+    free(b);
+    free(c);
+    free(d);
+
+    printf("\nattendu apres free : zones TINY et SMALL sans bloc, plus de LARGE, Total 0\n\n");
+    fflush(stdout);
+    show_alloc_mem();
+}
+
+static const t_test g_tests[] = {
+    {"100_per_zone", test_100_per_zone, 0},
+    {"basic", test_basic, 0},
+    {"alignment", test_alignment, 0},
+    {"no_overlap", test_no_overlap, 0},
+    {"zones", test_zones, 0},
+    {"new_heap", test_new_heap, 0},
+    {"large", test_large, 0},
+    {"errors", test_errors, 0},
+    {"zero", test_zero, 0},
+    {"stress", test_stress, 0},
+    {"free_null", test_free_null, 0},
+    {"free_reuse", test_free_reuse, 0},
+    {"double_free", test_double_free, 0},
+    {"invalid_free", test_invalid_free, 0},
+    {"merge_left", test_merge_left, 0},
+    {"merge_right", test_merge_right, 0},
+    {"merge_both", test_merge_both, 0},
+    {"split", test_split, 0},
+    {"loop", test_loop_stable, 0},
+    {"free_orders", test_free_orders, 0},
+    {"large_free", test_large_free, 1},
+    {"large_own_zone", test_large_own_zone, 0},
+    {"free_stress", test_free_stress, 0},
+    {"realloc_null", test_realloc_null, 0},
+    {"realloc_zero", test_realloc_zero, 0},
+    {"realloc_same", test_realloc_same, 0},
+    {"realloc_shrink", test_realloc_shrink, 0},
+    {"realloc_shrink_nosplit", test_realloc_shrink_nosplit, 0},
+    {"realloc_grow_inplace", test_realloc_grow_inplace, 0},
+    {"realloc_grow_split", test_realloc_grow_split, 0},
+    {"realloc_grow_move", test_realloc_grow_move, 0},
+    {"realloc_categories", test_realloc_categories, 0},
+    {"realloc_large", test_realloc_large, 0},
+    {"realloc_invalid", test_realloc_invalid, 0},
+    {"realloc_stress", test_realloc_stress, 0},
+	{"show_alloc_mem", test_show_alloc_mem, 0},
+};
+
+static int run_test(const t_test *t) {
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid < 0)
+        return 1;
+    if (pid == 0) {
+        g_fail = 0;
+        t->fn();
+        fflush(stdout);
+        _exit(g_fail != 0);
+    }
+    int st;
+    waitpid(pid, &st, 0);
+    if (WIFSIGNALED(st)) {
+        if (t->expect_segv && WTERMSIG(st) == SIGSEGV) {
+            printf("  [OK]   %s : segfault attendu apres munmap\n", t->name);
+            return 0;
+        }
+        printf("  [FAIL] %s : tue par le signal %d\n", t->name, WTERMSIG(st));
+        return 1;
+    }
+    return WEXITSTATUS(st) != 0;
+}
+
 int main(void) {
-    test_100_per_zone();
-    test_basic();
-    test_alignment();
-    test_no_overlap();
-    test_zones();
-    test_new_heap();
-    test_large();
-    test_errors();
-    test_zero();
-    test_stress();
+    static char outbuf[4096];
+    setvbuf(stdout, outbuf, _IOLBF, sizeof(outbuf));
 
-    printf("\n=== free ===\n");
-    test_free_null();
-    test_free_reuse();
-    test_double_free();
-    test_invalid_free();
-    test_merge_left();
-    test_merge_right();
-    test_merge_both();
-    test_split();
-    test_loop_stable();
-    test_free_orders();
-    // test_large_free();
-    test_large_own_zone();
-    test_free_stress();
+    int failed = 0;
+    size_t n = sizeof(g_tests) / sizeof(*g_tests);
+    for (size_t i = 0; i < n; i++)
+        failed += run_test(&g_tests[i]);
 
-    printf("\n%s (%d echec(s))\n", g_fail ? "ECHEC" : "TOUS LES TESTS PASSENT", g_fail);
-    return g_fail != 0;
+    printf("\n%s (%d test(s) en echec sur %zu)\n",
+           failed ? "ECHEC" : "TOUS LES TESTS PASSENT", failed, n);
+    return failed != 0;
 }

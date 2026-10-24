@@ -8,6 +8,7 @@ void init_block(t_block *block, t_block *prev, size_t size) {
 	block->prev = prev;
 	block->size = size;
 	block->free = FALSE;
+	block->padding = 0;
 }
 
 t_block *check_available_block(t_heap *heap, size_t size) {
@@ -91,9 +92,16 @@ void *check_available_heap(size_t size, SizeType type) {
 }
 
 void *malloc(size_t size) {
-	if (is_max_size(size) || !size)
+	if (is_max_size(size))
 		return NULL;
-	size = (size + 15) & ~15;
-	SizeType type = get_size_type(size);
-	return check_available_heap(size, type);
+	size_t rounded_size = (size + 15) & ~15;
+	if (!rounded_size)
+		rounded_size = 16;
+	SizeType type = get_size_type(rounded_size);
+	void *ptr = check_available_heap(rounded_size, type);
+	if (!ptr)
+		return NULL;
+	t_block *b = (t_block *)((uint8_t *)ptr - sizeof(t_block));
+	b->padding = b->size - size;
+	return ptr;
 }

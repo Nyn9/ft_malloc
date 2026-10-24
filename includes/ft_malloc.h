@@ -24,6 +24,7 @@ typedef struct s_block {
 	struct s_block *prev;
 	size_t size;
 	Bool free;
+	uint8_t padding;
 } __attribute__((aligned(16))) t_block;
 
 typedef struct s_heap {
@@ -37,7 +38,7 @@ typedef struct s_heap {
 #define TINY_HEAP_SIZE (4 * sysconf(_SC_PAGESIZE))
 #define TINY_BLOCK_SIZE (TINY_HEAP_SIZE / 128)
 
-#define SMALL_HEAP_SIZE (16 * sysconf(_SC_PAGESIZE))
+#define SMALL_HEAP_SIZE (128 * sysconf(_SC_PAGESIZE))
 #define SMALL_BLOCK_SIZE (SMALL_HEAP_SIZE / 128)
 
 extern t_heap *g_heap;
@@ -46,9 +47,12 @@ void free(void *ptr);
 void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 
+void show_alloc_mem();
+
 SizeType get_size_type(size_t size);
 size_t get_heap_size(SizeType type, size_t size);
 t_block *split_block(t_block *block, size_t size);
 void merge_block(t_block *p, t_block *n);
 t_block *find_block(t_heap *heap, void *ptr);
+t_heap *find_heap(void *ptr);
 int is_max_size(size_t size);

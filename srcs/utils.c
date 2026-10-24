@@ -23,6 +23,7 @@ t_block *split_block(t_block *block, size_t size) {
 	t_block *new = (t_block *)((char *)block + sizeof(t_block) + size);
 	new->size = block->size - size - sizeof(t_block);
 	new->free = TRUE;
+	new->padding = 0;
 	new->next = next;
 	new->prev = block;
 	if (next)
@@ -40,6 +41,16 @@ void merge_block(t_block *p, t_block *n) {
 	p->size = newSize;
 	if (next)
 		next->prev = p;
+}
+
+t_heap *find_heap(void *ptr) {
+	t_heap *heap = g_heap;
+	while (heap) {
+		if ((char *)ptr >= (char *)heap && (char *)ptr < (char *)heap + heap->totalSize)
+			break;
+		heap = heap->next;
+	}
+	return heap;
 }
 
 t_block *find_block(t_heap *heap, void *ptr) {
